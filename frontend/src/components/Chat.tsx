@@ -42,40 +42,42 @@ function Chat() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const activeConversation =
-    conversations.find(({ id }) => id === activeId) ?? {
-      id: 0,
-      title: "New conversation",
-      messages: [],
-    };
+  const activeConversation = conversations.find(
+    ({ id }) => id === activeId,
+  ) ?? {
+    id: 0,
+    title: "New conversation",
+    messages: [],
+  };
 
   function selectConversation(id: number) {
+    if (isLoading) return;
     setActiveId(id);
     setIsSidebarOpen(false);
   }
 
   function createConversation() {
+    if (isLoading) return;
     setActiveId(null);
     setDraft("");
     setIsSidebarOpen(false);
   }
 
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
 
-    if (!content) return;
+    if (!content || isLoading) return;
 
     const userMessage: Message = { id: Date.now(), role: "user", content };
+    const conversationId = activeId ?? userMessage.id;
+
     setConversations((current) =>
       activeId === null
         ? [
-            {
-              id: userMessage.id,
-              title: content,
-              messages: [userMessage],
-            },
+            { id: conversationId, title: content, messages: [userMessage] },
             ...current,
           ]
         : current.map((conversation) =>
@@ -91,8 +93,63 @@ function Chat() {
               : conversation,
           ),
     );
-    setActiveId(userMessage.id);
+    setActiveId(conversationId);
     setDraft("");
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("http://localhost:3000/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json"
+        },
+        body:JSON.stringify({query:draft})
+      });
+
+      if (!response.ok) {
+        throw new Error("The chat service is unavailable right now.");
+      }
+
+      const result = await response.json();
+      const assistantMessage: Message = {
+        id: Date.now(),
+        role: "assistant",
+        content: result.data.response,
+      };
+
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId
+            ? {
+                ...conversation,
+                messages: [...conversation.messages, assistantMessage],
+              }
+            : conversation,
+        ),
+      );
+    } catch (error) {
+      const assistantMessage: Message = {
+        id: Date.now(),
+        role: "assistant",
+        content:
+          error instanceof Error
+            ? error.message
+            : "Something went wrong. Please try again.",
+      };
+
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId
+            ? {
+                ...conversation,
+                messages: [...conversation.messages, assistantMessage],
+              }
+            : conversation,
+        ),
+      );
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
@@ -157,6 +214,7 @@ function Chat() {
               }`}
               key={conversation.id}
               onClick={() => selectConversation(conversation.id)}
+              disabled={isLoading}
               type="button"
             >
               <span className="text-[15px] text-[#91a0a6]">◌</span>
@@ -172,6 +230,7 @@ function Chat() {
           <button
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] text-[#66757d] hover:bg-white/70 hover:text-[#263640]"
             type="button"
+            disabled={isLoading}
           >
             <span className="text-base">⚙</span>
             Settings
@@ -222,7 +281,7 @@ function Chat() {
 
         <div className="flex flex-1 flex-col overflow-y-auto">
           <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col px-5 pb-8 pt-10 sm:px-8 sm:pt-14">
-            {activeConversation.messages.length === 0 ? (
+            {activeConversation.messages.length === 0 && !isLoading ? (
               <div className="m-auto w-full max-w-[580px] pb-16 text-center">
                 <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#dceee9] text-2xl text-[#1c766c]">
                   ✦
@@ -262,6 +321,21 @@ function Chat() {
                     </div>
                   </article>
                 ))}
+                {isLoading && (
+                  <article
+                    className="flex gap-3"
+                    aria-label="Compass is thinking"
+                  >
+                    <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#dceee9] text-sm font-bold text-[#1c766c]">
+                      C
+                    </div>
+                    <div className="flex items-center gap-1 pt-2" role="status">
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4] [animation-delay:-0.2s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4] [animation-delay:-0.1s]" />
+                      <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4]" />
+                    </div>
+                  </article>
+                )}
               </div>
             )}
           </div>
@@ -283,11 +357,12 @@ function Chat() {
                 }}
                 placeholder="Message compass..."
                 value={draft}
+                disabled={isLoading}
               />
               <button
                 aria-label="Send message"
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1c766c] text-xl text-white transition hover:bg-[#155f57] disabled:cursor-not-allowed disabled:bg-[#d3dfdd]"
-                disabled={!draft.trim()}
+                disabled={!draft.trim() || isLoading}
                 type="submit"
               >
                 ↑

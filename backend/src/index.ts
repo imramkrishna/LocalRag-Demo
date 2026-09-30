@@ -1,16 +1,27 @@
 import express from "express";
 import { model } from "./ai/config";
-
+import cors from "cors"
 const app = express();
 app.use(express.json())
-
+app.use(cors({
+  origin:['http://localhost:5173']
+}))
 app.get("/", (req, res) => {
   res.send("Hello!!! Server is working");
 });
 
-app.get("/chat", async (req, res) => {
+app.post("/chat", async (req, res) => {
   try {
-    const response = await model.invoke("Hello, Who is this ?");
+    const {query}=req.body;
+    if(!query){
+      res.json({
+        status:400,
+        success:false,
+        message:"No query passed, Pass the query to get the response",
+      })
+      return;
+    }
+    const response = await model.invoke(query);
     console.log(response)
     res.json({
         success:true,
