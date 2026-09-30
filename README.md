@@ -1,1 +1,1 @@
-###This is local rag implementation using langchain in typescript.
+###This is local rag implementation using langchain and langgraph in typescript.

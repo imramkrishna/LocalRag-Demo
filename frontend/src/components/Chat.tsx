@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
-
 type Message = {
   id: number;
   role: "user" | "assistant";
@@ -15,27 +14,61 @@ type Conversation = {
 };
 
 const starterConversations: Conversation[] = [
-  {
-    id: 1,
-    title: "Plan a weekend in Kyoto",
-    messages: [],
-  },
-  {
-    id: 2,
-    title: "Explain quantum computing",
-    messages: [],
-  },
-  {
-    id: 3,
-    title: "Refine my project brief",
-    messages: [],
-  },
-  {
-    id: 4,
-    title: "Ideas for a dinner party",
-    messages: [],
-  },
+  { id: 1, title: "Plan a weekend in Kyoto", messages: [] },
+  { id: 2, title: "Explain quantum computing", messages: [] },
+  { id: 3, title: "Refine my project brief", messages: [] },
+  { id: 4, title: "Ideas for a dinner party", messages: [] },
 ];
+
+async function streamChatResponse(
+  query: string,
+  onChunk: (content: string) => void,
+) {
+  const response = await fetch("http://localhost:3000/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error("The chat service is unavailable right now.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+
+    for (const event of events) {
+      const data = event
+        .split("\n")
+        .find((line) => line.startsWith("data:"))
+        ?.slice(5)
+        .trim();
+
+      if (!data) continue;
+      if (data === "[DONE]") return;
+
+      const parsed = JSON.parse(data) as {
+        content?: string;
+        error?: string;
+      };
+
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.content) onChunk(parsed.content);
+    }
+
+    if (done) break;
+  }
+}
 
 function Chat() {
   const [conversations, setConversations] = useState(starterConversations);
@@ -72,12 +105,21 @@ function Chat() {
     if (!content || isLoading) return;
 
     const userMessage: Message = { id: Date.now(), role: "user", content };
+    const assistantMessage: Message = {
+      id: Date.now() + 1,
+      role: "assistant",
+      content: "",
+    };
     const conversationId = activeId ?? userMessage.id;
 
     setConversations((current) =>
       activeId === null
         ? [
-            { id: conversationId, title: content, messages: [userMessage] },
+            {
+              id: conversationId,
+              title: content,
+              messages: [userMessage, assistantMessage],
+            },
             ...current,
           ]
         : current.map((conversation) =>
@@ -88,7 +130,7 @@ function Chat() {
                     conversation.messages.length === 0
                       ? content
                       : conversation.title,
-                  messages: [...conversation.messages, userMessage],
+                  messages: [...conversation.messages, userMessage, assistantMessage],
                 }
               : conversation,
           ),
@@ -98,51 +140,39 @@ function Chat() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:3000/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type":"application/json"
-        },
-        body:JSON.stringify({query:draft})
+      await streamChatResponse(content, (chunk) => {
+        setConversations((current) =>
+          current.map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  messages: conversation.messages.map((message) =>
+                    message.id === assistantMessage.id
+                      ? { ...message, content: message.content + chunk }
+                      : message,
+                  ),
+                }
+              : conversation,
+          ),
+        );
       });
-
-      if (!response.ok) {
-        throw new Error("The chat service is unavailable right now.");
-      }
-
-      const result = await response.json();
-      const assistantMessage: Message = {
-        id: Date.now(),
-        role: "assistant",
-        content: result.data.response,
-      };
-
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === conversationId
-            ? {
-                ...conversation,
-                messages: [...conversation.messages, assistantMessage],
-              }
-            : conversation,
-        ),
-      );
     } catch (error) {
-      const assistantMessage: Message = {
-        id: Date.now(),
-        role: "assistant",
-        content:
-          error instanceof Error
-            ? error.message
-            : "Something went wrong. Please try again.",
-      };
-
       setConversations((current) =>
         current.map((conversation) =>
           conversation.id === conversationId
             ? {
                 ...conversation,
-                messages: [...conversation.messages, assistantMessage],
+                messages: conversation.messages.map((message) =>
+                  message.id === assistantMessage.id
+                    ? {
+                        ...message,
+                        content:
+                          error instanceof Error
+                            ? error.message
+                            : "Something went wrong. Please try again.",
+                      }
+                    : message,
+                ),
               }
             : conversation,
         ),
