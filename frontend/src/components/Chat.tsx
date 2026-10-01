@@ -1,120 +1,66 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { useStream } from "@langchain/langgraph-sdk/react";
-type Message = {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-};
+import { DefaultChatTransport } from "ai";
+import { useChat } from "@ai-sdk/react";
 
 type Conversation = {
   id: string;
   title: string;
-  threadId?: string;
-  messages: Message[];
 };
 
 const starterConversations: Conversation[] = [
-  { id: "history-1", title: "Plan a weekend in Kyoto", messages: [] },
-  { id: "history-2", title: "Explain quantum computing", messages: [] },
-  { id: "history-3", title: "Refine my project brief", messages: [] },
-  { id: "history-4", title: "Ideas for a dinner party", messages: [] },
+  { id: "history-1", title: "Plan a weekend in Kyoto" },
+  { id: "history-2", title: "Explain quantum computing" },
+  { id: "history-3", title: "Refine my project brief" },
+  { id: "history-4", title: "Ideas for a dinner party" },
 ];
 
-function getMessageContent(content: unknown) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  return content
-    .filter(
-      (part): part is { type: "text"; text: string } =>
-        typeof part === "object" &&
-        part !== null &&
-        "type" in part &&
-        part.type === "text" &&
-        "text" in part &&
-        typeof part.text === "string",
-    )
-    .map((part) => part.text)
-    .join("");
-}
-
 function Chat() {
-  const [conversations, setConversations] = useState(starterConversations);
+  const { messages, sendMessage, status } = useChat({
+    transport: new DefaultChatTransport({
+      api: "http://localhost:3000/chat",
+    }),
+  });
+  const conversations = starterConversations;
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [pendingTitle, setPendingTitle] = useState("");
+  const isLoading = status === "submitted" || status === "streaming";
 
-  const thread = useStream({
-    apiUrl: "http://localhost:2024",
-    assistantId: "chat",
-    threadId,
-    onThreadId: (newThreadId) => {
-      setThreadId(newThreadId);
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === activeId
-            ? { ...conversation, threadId: newThreadId }
-            : conversation,
-        ),
-      );
-    },
-  });
-  const isLoading = thread.isLoading;
+  function messageText(message: (typeof messages)[number]) {
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+
+    if (text) return text;
+
+    if (
+      "content" in message &&
+      typeof message.content === "string"
+    ) {
+      return message.content;
+    }
+
+    return "";
+  }
 
   const activeConversation = conversations.find(
     ({ id }) => id === activeId,
   ) ?? {
     id: "new",
-    title: pendingTitle || "New conversation",
-    messages: [],
+    title: "New conversation",
   };
-  const streamMessages = thread.messages.map((message, index) => ({
-    id: String(message.id ?? index),
-    role: message.type === "human" ? ("user" as const) : ("assistant" as const),
-    content: getMessageContent(message.content),
-  }));
 
   function selectConversation(id: string) {
-    if (isLoading) return;
-    const conversation = conversations.find((item) => item.id === id);
     setActiveId(id);
-    setThreadId(conversation?.threadId ?? null);
     setIsSidebarOpen(false);
   }
 
   function createConversation() {
-    if (isLoading) return;
     setActiveId(null);
-    setThreadId(null);
-    setPendingTitle("");
     setDraft("");
     setIsSidebarOpen(false);
-  }
-
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
-
-    if (!content || isLoading) return;
-
-    const conversationId = activeId ?? `local-${Date.now()}`;
-    setConversations((current) =>
-      activeId === null
-        ? [{ id: conversationId, title: content, messages: [] }, ...current]
-        : current.map((conversation) =>
-            conversation.id === activeId
-              ? { ...conversation, title: content }
-              : conversation,
-          ),
-    );
-    setActiveId(conversationId);
-    setPendingTitle(content);
-    setDraft("");
-    thread.submit({ messages: [{ type: "human", content }] });
   }
 
   return (
@@ -246,7 +192,7 @@ function Chat() {
 
         <div className="flex flex-1 flex-col overflow-y-auto">
           <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col px-5 pb-8 pt-10 sm:px-8 sm:pt-14">
-            {streamMessages.length === 0 && !isLoading ? (
+            {messages.length === 0 ? (
               <div className="m-auto w-full max-w-[580px] pb-16 text-center">
                 <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#dceee9] text-2xl text-[#1c766c]">
                   ✦
@@ -261,28 +207,22 @@ function Chat() {
               </div>
             ) : (
               <div className="space-y-8">
-                {streamMessages.map((message) => (
+                {messages.map((message) => (
                   <article
-                    className={
-                      message.role === "user"
-                        ? "flex justify-end"
-                        : "flex gap-3"
-                    }
+                    className={message.role === "user" ? "flex justify-end" : "flex gap-3"}
                     key={message.id}
                   >
-                    {message.role === "assistant" && (
+                    {message.role !== "user" && (
                       <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#dceee9] text-sm font-bold text-[#1c766c]">
                         C
                       </div>
                     )}
                     <div
-                      className={
-                        message.role === "user"
-                          ? "max-w-[80%] rounded-2xl rounded-br-md bg-[#1c766c] px-4 py-3 text-[14px] leading-6 text-white"
-                          : "max-w-[680px] pt-1 text-[14px] leading-7 text-[#43535b]"
-                      }
+                      className={message.role === "user"
+                        ? "max-w-[80%] rounded-2xl rounded-br-md bg-[#1c766c] px-4 py-3 text-[14px] leading-6 text-white"
+                        : "max-w-[680px] pt-1 text-[14px] leading-7 text-[#43535b]"}
                     >
-                      {message.content}
+                      {messageText(message)}
                     </div>
                   </article>
                 ))}
@@ -308,7 +248,13 @@ function Chat() {
           <div className="sticky bottom-0 bg-gradient-to-t from-[#f7f8fa] via-[#f7f8fa] to-transparent px-5 pb-5 pt-4 sm:px-8 sm:pb-8">
             <form
               className="mx-auto flex w-full max-w-[780px] items-end gap-3 rounded-2xl border border-[#d9e1e3] bg-white p-2.5 pl-4 shadow-[0_8px_24px_rgba(32,48,57,0.06)] focus-within:border-[#9bc9c1] focus-within:ring-4 focus-within:ring-[#dceee9]"
-              onSubmit={sendMessage}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (draft.trim()) {
+                  sendMessage({ text: draft });
+                  setDraft("");
+                }
+              }}
             >
               <textarea
                 aria-label="Message"

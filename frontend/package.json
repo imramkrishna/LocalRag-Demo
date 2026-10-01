@@ -10,8 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@langchain/langgraph-sdk": "^1.12.0",
+    "@ai-sdk/react": "^4.0.130",
     "@tailwindcss/vite": "^4.3.3",
+    "ai": "^7.0.127",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",

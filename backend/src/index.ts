@@ -1,7 +1,10 @@
 import express from "express";
-import { model } from "./ai/config";
 import cors from "cors";
-import { HumanMessage } from "langchain";
+import { HumanMessage } from "@langchain/core/messages";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+} from "ai";
 import { chatGraph } from "./ai/graph";
 const app = express();
 app.use(express.json());
@@ -15,7 +18,10 @@ app.get("/", (req, res) => {
 });
 
 app.post("/chat", async (req, res) => {
-  const { query } = req.body;
+  const query = req.body.messages?.at(-1)?.parts?.find(
+    (part: { type?: string }): part is { type: "text"; text: string } =>
+      part.type === "text",
+  )?.text;
 
   if (!query) {
     res.status(400).json({
@@ -25,48 +31,57 @@ app.post("/chat", async (req, res) => {
     return;
   }
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
+  console.log("New Query Received : ", query);
 
-  try {
-    const stream = await chatGraph.stream(
-      {
-        messages: [new HumanMessage(query)],
-      },
-      {
-        streamMode: "messages",
-      },
-    );
+  const stream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      const textPartId = `answer-${Date.now()}`;
+      writer.write({ type: "text-start", id: textPartId });
 
-    for await (const chunk of stream) {
-      const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk;
-
-      const content =
-        typeof messageChunk.content === "string" ? messageChunk.content : "";
-
-      if (!content) continue;
-
-      res.write(
-        `data: ${JSON.stringify({
-          content,
-        })}\n\n`,
+      const graphStream = await chatGraph.stream(
+        {
+          messages: [new HumanMessage(query)],
+        },
+        { streamMode: "messages" },
       );
-    }
 
-    res.write("data: [DONE]\n\n");
+      for await (const chunk of graphStream) {
+        const messageChunk = Array.isArray(chunk) ? chunk[0] : chunk;
+        const content =
+          typeof messageChunk.content === "string" ? messageChunk.content : "";
+
+        if (content) {
+          writer.write({ type: "text-delta", id: textPartId, delta: content });
+        }
+      }
+
+      writer.write({ type: "text-end", id: textPartId });
+    },
+    onError: (error) => {
+      console.error(error);
+      return "Chat processing failed";
+    },
+  });
+
+  const response = createUIMessageStreamResponse({ stream });
+  response.headers.forEach((value, key) => res.setHeader(key, value));
+  res.status(response.status);
+
+  if (!response.body) {
     res.end();
-  } catch (error) {
-    console.error(error);
-
-    res.write(
-      `data: ${JSON.stringify({
-        error: "Chat processing failed",
-      })}\n\n`,
-    );
-
-    res.end();
+    return;
   }
+
+  const reader = response.body.getReader();
+  const encoder = new TextDecoder();
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    res.write(encoder.decode(value, { stream: true }));
+  }
+
+  res.end();
 });
 app.listen(3000, () => {
   console.log("Server is listening on port 3000");
