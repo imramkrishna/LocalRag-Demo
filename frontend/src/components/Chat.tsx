@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { useStream } from "@langchain/langgraph-sdk/react";
 type Message = {
   id: number;
   role: "user" | "assistant";
@@ -8,178 +9,113 @@ type Message = {
 };
 
 type Conversation = {
-  id: number;
+  id: string;
   title: string;
+  threadId?: string;
   messages: Message[];
 };
 
 const starterConversations: Conversation[] = [
-  { id: 1, title: "Plan a weekend in Kyoto", messages: [] },
-  { id: 2, title: "Explain quantum computing", messages: [] },
-  { id: 3, title: "Refine my project brief", messages: [] },
-  { id: 4, title: "Ideas for a dinner party", messages: [] },
+  { id: "history-1", title: "Plan a weekend in Kyoto", messages: [] },
+  { id: "history-2", title: "Explain quantum computing", messages: [] },
+  { id: "history-3", title: "Refine my project brief", messages: [] },
+  { id: "history-4", title: "Ideas for a dinner party", messages: [] },
 ];
 
-async function streamChatResponse(
-  query: string,
-  onChunk: (content: string) => void,
-) {
-  const response = await fetch("http://localhost:3000/chat", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query }),
-  });
+function getMessageContent(content: unknown) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
 
-  if (!response.ok || !response.body) {
-    throw new Error("The chat service is unavailable right now.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-    const events = buffer.split("\n\n");
-    buffer = events.pop() ?? "";
-
-    for (const event of events) {
-      const data = event
-        .split("\n")
-        .find((line) => line.startsWith("data:"))
-        ?.slice(5)
-        .trim();
-
-      if (!data) continue;
-      if (data === "[DONE]") return;
-
-      const parsed = JSON.parse(data) as {
-        content?: string;
-        error?: string;
-      };
-
-      if (parsed.error) throw new Error(parsed.error);
-      if (parsed.content) onChunk(parsed.content);
-    }
-
-    if (done) break;
-  }
+  return content
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        typeof part === "object" &&
+        part !== null &&
+        "type" in part &&
+        part.type === "text" &&
+        "text" in part &&
+        typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("");
 }
 
 function Chat() {
   const [conversations, setConversations] = useState(starterConversations);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [pendingTitle, setPendingTitle] = useState("");
+
+  const thread = useStream({
+    apiUrl: "http://localhost:2024",
+    assistantId: "chat",
+    threadId,
+    onThreadId: (newThreadId) => {
+      setThreadId(newThreadId);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === activeId
+            ? { ...conversation, threadId: newThreadId }
+            : conversation,
+        ),
+      );
+    },
+  });
+  const isLoading = thread.isLoading;
 
   const activeConversation = conversations.find(
     ({ id }) => id === activeId,
   ) ?? {
-    id: 0,
-    title: "New conversation",
+    id: "new",
+    title: pendingTitle || "New conversation",
     messages: [],
   };
+  const streamMessages = thread.messages.map((message, index) => ({
+    id: String(message.id ?? index),
+    role: message.type === "human" ? ("user" as const) : ("assistant" as const),
+    content: getMessageContent(message.content),
+  }));
 
-  function selectConversation(id: number) {
+  function selectConversation(id: string) {
     if (isLoading) return;
+    const conversation = conversations.find((item) => item.id === id);
     setActiveId(id);
+    setThreadId(conversation?.threadId ?? null);
     setIsSidebarOpen(false);
   }
 
   function createConversation() {
     if (isLoading) return;
     setActiveId(null);
+    setThreadId(null);
+    setPendingTitle("");
     setDraft("");
     setIsSidebarOpen(false);
   }
 
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
+  function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
 
     if (!content || isLoading) return;
 
-    const userMessage: Message = { id: Date.now(), role: "user", content };
-    const assistantMessage: Message = {
-      id: Date.now() + 1,
-      role: "assistant",
-      content: "",
-    };
-    const conversationId = activeId ?? userMessage.id;
+    const conversationId = activeId ?? `local-${Date.now()}`;
 
     setConversations((current) =>
       activeId === null
-        ? [
-            {
-              id: conversationId,
-              title: content,
-              messages: [userMessage, assistantMessage],
-            },
-            ...current,
-          ]
+        ? [{ id: conversationId, title: content, messages: [] }, ...current]
         : current.map((conversation) =>
             conversation.id === activeId
-              ? {
-                  ...conversation,
-                  title:
-                    conversation.messages.length === 0
-                      ? content
-                      : conversation.title,
-                  messages: [...conversation.messages, userMessage, assistantMessage],
-                }
+              ? { ...conversation, title: content }
               : conversation,
           ),
     );
     setActiveId(conversationId);
+    setPendingTitle(content);
     setDraft("");
-    setIsLoading(true);
-
-    try {
-      await streamChatResponse(content, (chunk) => {
-        setConversations((current) =>
-          current.map((conversation) =>
-            conversation.id === conversationId
-              ? {
-                  ...conversation,
-                  messages: conversation.messages.map((message) =>
-                    message.id === assistantMessage.id
-                      ? { ...message, content: message.content + chunk }
-                      : message,
-                  ),
-                }
-              : conversation,
-          ),
-        );
-      });
-    } catch (error) {
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === conversationId
-            ? {
-                ...conversation,
-                messages: conversation.messages.map((message) =>
-                  message.id === assistantMessage.id
-                    ? {
-                        ...message,
-                        content:
-                          error instanceof Error
-                            ? error.message
-                            : "Something went wrong. Please try again.",
-                      }
-                    : message,
-                ),
-              }
-            : conversation,
-        ),
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    thread.submit({ messages: [{ type: "human", content }] });
   }
 
   return (
@@ -311,7 +247,7 @@ function Chat() {
 
         <div className="flex flex-1 flex-col overflow-y-auto">
           <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col px-5 pb-8 pt-10 sm:px-8 sm:pt-14">
-            {activeConversation.messages.length === 0 && !isLoading ? (
+            {streamMessages.length === 0 && !isLoading ? (
               <div className="m-auto w-full max-w-[580px] pb-16 text-center">
                 <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#dceee9] text-2xl text-[#1c766c]">
                   ✦
@@ -326,7 +262,7 @@ function Chat() {
               </div>
             ) : (
               <div className="space-y-8">
-                {activeConversation.messages.map((message) => (
+                {streamMessages.map((message) => (
                   <article
                     className={
                       message.role === "user"
