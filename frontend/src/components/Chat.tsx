@@ -102,7 +102,6 @@ function Chat() {
     if (!content || isLoading) return;
 
     const conversationId = activeId ?? `local-${Date.now()}`;
-
     setConversations((current) =>
       activeId === null
         ? [{ id: conversationId, title: content, messages: [] }, ...current]

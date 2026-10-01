@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "chat": "./src/ai/graph.ts:chatGraph"
+  },
+  "env": ".env"
+}
