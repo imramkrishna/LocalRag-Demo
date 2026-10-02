@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DefaultChatTransport } from "ai";
 import { useChat } from "@ai-sdk/react";
@@ -16,7 +16,7 @@ const starterConversations: Conversation[] = [
 ];
 
 function Chat() {
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({
       api: "http://localhost:3000/chat",
     }),
@@ -25,7 +25,13 @@ function Chat() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const isLoading = status === "submitted" || status === "streaming";
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (error || status === "error" || status === "ready") {
+      setIsLoading(false);
+    }
+  }, [error, status]);
 
   function messageText(message: (typeof messages)[number]) {
     const text = message.parts
@@ -44,6 +50,13 @@ function Chat() {
 
     return "";
   }
+
+  const lastMessage = messages[messages.length - 1];
+  const showTypingIndicator =
+    isLoading &&
+    (!lastMessage ||
+      lastMessage.role !== "assistant" ||
+      !messageText(lastMessage));
 
   const activeConversation = conversations.find(
     ({ id }) => id === activeId,
@@ -226,20 +239,30 @@ function Chat() {
                     </div>
                   </article>
                 ))}
-                {isLoading && (
+                {showTypingIndicator && (
                   <article
                     className="flex gap-3"
-                    aria-label="Compass is thinking"
+                    aria-label="Compass is writing"
+                    aria-live="polite"
                   >
                     <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#dceee9] text-sm font-bold text-[#1c766c]">
                       C
                     </div>
-                    <div className="flex items-center gap-1 pt-2" role="status">
+                    <div className="flex items-center gap-2 pt-2" role="status">
                       <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4] [animation-delay:-0.2s]" />
                       <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4] [animation-delay:-0.1s]" />
                       <span className="h-2 w-2 animate-bounce rounded-full bg-[#8aa9a4]" />
+                      <span className="text-xs text-[#8a979d]">Compass is writing...</span>
                     </div>
                   </article>
+                )}
+                {error && (
+                  <p
+                    className="rounded-xl border border-[#edcaca] bg-[#fff7f7] px-4 py-3 text-sm text-[#a34b4b]"
+                    role="alert"
+                  >
+                    We couldn&apos;t complete that request. Please try again.
+                  </p>
                 )}
               </div>
             )}
@@ -250,10 +273,12 @@ function Chat() {
               className="mx-auto flex w-full max-w-[780px] items-end gap-3 rounded-2xl border border-[#d9e1e3] bg-white p-2.5 pl-4 shadow-[0_8px_24px_rgba(32,48,57,0.06)] focus-within:border-[#9bc9c1] focus-within:ring-4 focus-within:ring-[#dceee9]"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (draft.trim()) {
-                  sendMessage({ text: draft });
-                  setDraft("");
-                }
+                const text = draft.trim();
+                if (!text || isLoading) return;
+
+                setIsLoading(true);
+                sendMessage({ text });
+                setDraft("");
               }}
             >
               <textarea
@@ -271,12 +296,20 @@ function Chat() {
                 disabled={isLoading}
               />
               <button
-                aria-label="Send message"
+                aria-label={isLoading ? "Sending message" : "Send message"}
+                aria-busy={isLoading}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1c766c] text-xl text-white transition hover:bg-[#155f57] disabled:cursor-not-allowed disabled:bg-[#d3dfdd]"
                 disabled={!draft.trim() || isLoading}
                 type="submit"
               >
-                ↑
+                {isLoading ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  />
+                ) : (
+                  "↑"
+                )}
               </button>
             </form>
             <p className="mt-3 text-center text-[11px] text-[#9aa6aa]">
