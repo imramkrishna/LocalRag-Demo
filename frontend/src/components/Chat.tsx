@@ -220,25 +220,31 @@ function Chat() {
               </div>
             ) : (
               <div className="space-y-8">
-                {messages.map((message) => (
-                  <article
-                    className={message.role === "user" ? "flex justify-end" : "flex gap-3"}
-                    key={message.id}
-                  >
-                    {message.role !== "user" && (
-                      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#dceee9] text-sm font-bold text-[#1c766c]">
-                        C
-                      </div>
-                    )}
-                    <div
-                      className={message.role === "user"
-                        ? "max-w-[80%] rounded-2xl rounded-br-md bg-[#1c766c] px-4 py-3 text-[14px] leading-6 text-white"
-                        : "max-w-[680px] pt-1 text-[14px] leading-7 text-[#43535b]"}
+                {messages.map((message) => {
+                  const text = messageText(message);
+
+                  if (message.role === "assistant" && !text) return null;
+
+                  return (
+                    <article
+                      className={message.role === "user" ? "flex justify-end" : "flex gap-3"}
+                      key={message.id}
                     >
-                      {messageText(message)}
-                    </div>
-                  </article>
-                ))}
+                      {message.role !== "user" && (
+                        <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#dceee9] text-sm font-bold text-[#1c766c]">
+                          C
+                        </div>
+                      )}
+                      <div
+                        className={message.role === "user"
+                          ? "max-w-[80%] rounded-2xl rounded-br-md bg-[#1c766c] px-4 py-3 text-[14px] leading-6 text-white"
+                          : "max-w-[680px] pt-1 text-[14px] leading-7 text-[#43535b]"}
+                      >
+                        {text}
+                      </div>
+                    </article>
+                  );
+                })}
                 {showTypingIndicator && (
                   <article
                     className="flex gap-3"
