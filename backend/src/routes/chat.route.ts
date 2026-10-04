@@ -1,24 +1,8 @@
 import { Router } from "express";
-import db from "../db";
-import { chat } from "../db/schema";
-import { chatGraph } from "../ai/graph";
+import { createNewChat, updateChatTitle } from "../queries/chat";
 
 const chatRouter = Router();
-async function createNewChat() {
-  const newChat = db.insert(chat).values({}).returning({ id: chat.id });
-  if (!newChat) {
-    throw new Error("Error while creating new chat.");
-  }
-  return newChat;
-}
-async function updateChatTitle(query: string) {
-  const response = await chatGraph.invoke({
-    messages: [
-      `Generate Chat Title For The Query : ${query}. Make the Chat Title Short and donot exceed more than 50 characters. Just Give a single response whatever you think is best in suited chat title for this query. Avoid Giving me Options, Just Generate me a chat title.`,
-    ],
-  });
-  return response.messages[response.messages.length - 1].content;
-}
+
 chatRouter.post("/new", async (req, res) => {
   const { query } = req.body;
   try {
@@ -28,14 +12,14 @@ chatRouter.post("/new", async (req, res) => {
         message: "Query Not Found.",
       });
     }
-    const newChatId = await createNewChat();
-    console.log("New Chat Created : ", newChatId);
+    const newChat = await createNewChat();
+    console.log("New Chat Created : ", newChat[0].id);
     const newTitle = await updateChatTitle(query);
-    console.log("This is new Title ", newTitle);
+    console.log("This is new Title :", newTitle);
     res.status(200).json({
       success: true,
       message: "New Chat Created",
-      data: { id: newChatId, title: newTitle },
+      data: { id: newChat[0].id, title: newTitle },
     });
   } catch (error) {
     console.log("Error while processing your request : ", error);
