@@ -1,1 +1,1 @@
-{"root":["./src/index.ts","./src/ai/config.ts","./src/ai/graph.ts"],"version":"5.9.3"}
+{"root":["./src/drizzle.config.ts","./src/index.ts","./src/ai/config.ts","./src/ai/graph.ts","./src/db/index.ts","./src/db/schema.ts","./src/routes/chat.route.ts"],"version":"5.9.3"}

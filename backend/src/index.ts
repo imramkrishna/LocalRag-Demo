@@ -1,11 +1,9 @@
 import express from "express";
 import cors from "cors";
 import { HumanMessage } from "@langchain/core/messages";
-import {
-  createUIMessageStream,
-  createUIMessageStreamResponse,
-} from "ai";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { chatGraph } from "./ai/graph";
+import chatRouter from "./routes/chat.route";
 const app = express();
 app.use(express.json());
 app.use(
@@ -13,15 +11,19 @@ app.use(
     origin: ["http://localhost:5173"],
   }),
 );
+
+app.use("/chat", chatRouter);
 app.get("/", (req, res) => {
   res.send("Hello!!! Server is working");
 });
 
-app.post("/chat", async (req, res) => {
-  const query = req.body.messages?.at(-1)?.parts?.find(
-    (part: { type?: string }): part is { type: "text"; text: string } =>
-      part.type === "text",
-  )?.text;
+app.post("/chat-llm", async (req, res) => {
+  const query = req.body.messages
+    ?.at(-1)
+    ?.parts?.find(
+      (part: { type?: string }): part is { type: "text"; text: string } =>
+        part.type === "text",
+    )?.text;
 
   if (!query) {
     res.status(400).json({
