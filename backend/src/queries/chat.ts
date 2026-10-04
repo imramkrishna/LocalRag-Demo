@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { chatGraph } from "../ai/graph";
 import db from "../db";
 import { chat } from "../db/schema";
@@ -9,7 +10,7 @@ export async function createNewChat() {
   }
   return newChat;
 }
-export async function updateChatTitle(query: string) {
+export async function updateChatTitle(query: string, chatId: string) {
   try {
     const response = await chatGraph.invoke({
       messages: [
@@ -18,13 +19,21 @@ export async function updateChatTitle(query: string) {
     });
     const generatedTitle = response.messages[response.messages.length - 1]
       .content as string;
-    const insertedChatTitle = await db
-      .insert(chat)
-      .values({ title: generatedTitle })
-      .returning();
+    await db
+      .update(chat)
+      .set({ title: generatedTitle })
+      .where(eq(chat.id, chatId));
     return generatedTitle;
   } catch (error) {
     console.log("Error while Updating Chat Title : ", error);
     throw new Error(error as string);
   }
+}
+
+export async function findChatById(chatId: string) {
+  const chatFound = await db.select().from(chat).where(eq(chat.id, chatId));
+  if (chatFound.length <= 0) {
+    throw new Error("Could not finf chat");
+  }
+  return chatFound[0];
 }
